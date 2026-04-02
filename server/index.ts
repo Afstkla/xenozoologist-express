@@ -6,6 +6,7 @@ import fs from 'fs';
 import { createDb } from './db.js';
 import { catalogRouter } from './routes/catalog.js';
 import { leaderboardRouter } from './routes/leaderboard.js';
+import { setupSignaling } from './signaling.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -37,6 +38,8 @@ app.get('/api/health', (_req, res) => {
 app.get('/{*splat}', (_req, res) => {
   res.sendFile(path.join(clientDist, 'index.html'));
 });
+
+setupSignaling(server);
 
 server.listen(PORT, () => {
   console.log(`Xenozoologist Express server running on port ${PORT}`);
