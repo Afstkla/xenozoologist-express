@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { PRNG } from './utils/PRNG';
 import { createBiome } from './world/Biome';
 import { createTerrainMesh, generateHeightmap, TERRAIN_SIZE, TERRAIN_SEGMENTS } from './world/Terrain';
+import { generateFlora, updateFlora, FloraInstance } from './world/Flora';
 import { PlayerController } from './player/PlayerController';
 import { MobileControls } from './player/MobileControls';
 
@@ -46,6 +47,10 @@ function getTerrainHeight(worldX: number, worldZ: number): number {
   return h * biome.terrainScale;
 }
 
+// Flora
+const flora: FloraInstance[] = generateFlora(rng.fork('flora'), biome, getTerrainHeight, TERRAIN_SIZE);
+for (const { mesh } of flora) scene.add(mesh);
+
 // Player
 const player = new PlayerController(scene, camera);
 player.getPosition(); // prime internal state
@@ -81,6 +86,8 @@ function animate() {
   }
 
   player.update(dt, getTerrainHeight);
+  const elapsed = (performance.now() - startTime) / 1000;
+  updateFlora(flora, elapsed);
   renderer.render(scene, camera);
 }
 animate();
