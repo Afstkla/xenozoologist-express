@@ -3,6 +3,7 @@ import { PRNG } from './utils/PRNG';
 import { createBiome } from './world/Biome';
 import { createTerrainMesh, generateHeightmap, TERRAIN_SIZE, TERRAIN_SEGMENTS } from './world/Terrain';
 import { generateFlora, updateFlora, FloraInstance } from './world/Flora';
+import { spawnCreatures, updateCreatures, CreatureInstance } from './world/Fauna';
 import { PlayerController } from './player/PlayerController';
 import { MobileControls } from './player/MobileControls';
 
@@ -51,6 +52,10 @@ function getTerrainHeight(worldX: number, worldZ: number): number {
 const flora: FloraInstance[] = generateFlora(rng.fork('flora'), biome, getTerrainHeight, TERRAIN_SIZE);
 for (const { mesh } of flora) scene.add(mesh);
 
+// Fauna
+const creatures: CreatureInstance[] = spawnCreatures(rng.fork('fauna'), biome, getTerrainHeight, TERRAIN_SIZE);
+for (const { mesh } of creatures) scene.add(mesh);
+
 // Player
 const player = new PlayerController(scene, camera);
 player.getPosition(); // prime internal state
@@ -88,6 +93,7 @@ function animate() {
   player.update(dt, getTerrainHeight);
   const elapsed = (performance.now() - startTime) / 1000;
   updateFlora(flora, elapsed);
+  updateCreatures(creatures, dt, elapsed, player.getPosition(), getTerrainHeight, TERRAIN_SIZE);
   renderer.render(scene, camera);
 }
 animate();
