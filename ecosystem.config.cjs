@@ -6,7 +6,7 @@ module.exports = {
     cwd: '/var/www/xenozoologist-express',
     env: {
       NODE_ENV: 'production',
-      PORT: 7750,
+      PORT: 7755,
     },
   }],
 };

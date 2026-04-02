@@ -7,7 +7,7 @@ Vibe Jam 2026 entry. Multiplayer alien planet exploration game.
 - **Dev:** `npm run dev` (runs server + client concurrently)
 - **Build:** `npm run build` (builds client to client/dist/)
 - **Test:** `npm test`
-- **Server port:** 7750 (production), proxied from Vite at 5180 (dev)
+- **Server port:** 7755 (production), proxied from Vite at 5180 (dev)
 - **PM2 name:** vibejam
 - **Domain:** vibejam.afstkla.nl
 - **Spec:** docs/superpowers/specs/2026-04-02-xenozoologist-express-design.md
