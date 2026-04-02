@@ -48,7 +48,7 @@ const ui = new UIManager();
 
 const lobbyScreen = new LobbyScreen({
   onSetUsername: (name) => { username = name; lobbyClient.setUsername(name); },
-  onCreateLobby: () => lobbyClient.createLobby(),
+  onCreateLobby: () => lobbyClient.createLobby(username),
   onJoinLobby: (id) => lobbyClient.joinLobby(id),
   onStartGame: () => {
     const seed = Date.now();
@@ -176,7 +176,7 @@ function startRound(seed: number): void {
   // HUD
   hud.updateTimer(ROUND_DURATION);
   hud.updateScore(0);
-  hud.showChallenges(roundState.challenges, []);
+  hud.showChallenges(roundState.challenges, new Map());
 
   console.log(`Round started — Biome: ${biome.name} | Seed: ${seed}`);
 }
@@ -221,7 +221,7 @@ function handleScanComplete(result: ScanResult): void {
     }
     hud.showChallenges(
       roundState.challenges,
-      Array.from(roundState.completedChallenges.keys())
+      roundState.completedChallenges
     );
   }
 
@@ -310,7 +310,7 @@ lobbyClient.on('lobby-list', (data: any) => {
   lobbyScreen.updateLobbyList(data.lobbies ?? []);
 });
 
-lobbyClient.on('lobby-created', async (data: any) => {
+lobbyClient.on('lobby-created', async () => {
   isHost = true;
   gameManager.transition('lobby');
 
