@@ -324,8 +324,8 @@ export function updateCreatures(
     const moveMag = Math.abs(state.velocity.x) + Math.abs(state.velocity.z);
     if (moveMag > 0.01) {
       _forward.set(state.velocity.x, 0, state.velocity.z).normalize();
-      const angle = Math.atan2(_forward.x, _forward.z);
-      mesh.rotation.y = angle + Math.PI; // Head is at +Z local, flip to face movement
+      // Head/eyes are at +Z local, atan2(x,z) gives the angle where +Z = 0
+      mesh.rotation.y = Math.atan2(_forward.x, _forward.z);
     }
 
     // --- Limb animation ---
