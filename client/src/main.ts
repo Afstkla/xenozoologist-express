@@ -7,21 +7,14 @@ import { spawnCreatures, updateCreatures, CreatureInstance } from './world/Fauna
 import { PlayerController } from './player/PlayerController';
 import { MobileControls } from './player/MobileControls';
 import { Scanner, ScanResult } from './game/Scanner';
-import { GameManager } from './game/GameManager';
 import { createRound, updateRound, addScanToRound, getRoundResults, RoundState, ROUND_DURATION } from './game/Round';
-import { UIManager } from './ui/UIManager';
-import { LobbyScreen } from './ui/LobbyScreen';
 import { HUD } from './ui/HUD';
 import { ResultsScreen } from './ui/ResultsScreen';
-import { CatalogView } from './ui/CatalogView';
 import { SpeciesCard } from './ui/SpeciesCard';
 import { ParticleSystem } from './rendering/Particles';
 import { AudioManager } from './audio/AudioManager';
-import { LobbyClient } from './network/LobbyClient';
-import { GameHost } from './network/GameHost';
-import { GamePeer } from './network/GamePeer';
 
-// ── Renderer + Scene (always visible behind UI) ─────────────────────────────
+// ── Renderer ────────────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 500);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -30,7 +23,6 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-// Lighting (persistent across rounds)
 const ambient = new THREE.AmbientLight(0xffffff, 0.4);
 scene.add(ambient);
 const sun = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -38,47 +30,18 @@ sun.position.set(50, 80, 30);
 sun.castShadow = true;
 scene.add(sun);
 
-// ── Core Systems ─────────────────────────────────────────────────────────────
-const gameManager = new GameManager();
+// ── Audio ───────────────────────────────────────────────────────────────────
 const audio = new AudioManager();
-const lobbyClient = new LobbyClient();
 
-// ── UI ───────────────────────────────────────────────────────────────────────
-const ui = new UIManager();
-
-const lobbyScreen = new LobbyScreen({
-  onSetUsername: (name) => { username = name; lobbyClient.setUsername(name); },
-  onCreateLobby: () => lobbyClient.createLobby(username),
-  onJoinLobby: (id) => lobbyClient.joinLobby(id),
-  onStartGame: () => {
-    const seed = Date.now();
-    lobbyClient.startGame(seed);
-  },
-  onRefresh: () => lobbyClient.listLobbies(),
-});
-
-const hud = new HUD();
-const resultsScreen = new ResultsScreen();
-const catalogView = new CatalogView();
-
-ui.register('lobby', lobbyScreen.el);
-ui.register('hud', hud.el);
-ui.register('results', resultsScreen.el);
-ui.register('catalog', catalogView.el);
-
-// ── Game State Variables ─────────────────────────────────────────────────────
+// ── Game State ──────────────────────────────────────────────────────────────
 let username = 'Explorer';
-let isHost = false;
-let gameHost: GameHost | null = null;
-let gamePeer: GamePeer | null = null;
-
 let roundState: RoundState | null = null;
 let knownSpeciesIds = new Set<string>();
 let catalogSize = 0;
-let totalPossibleSpecies = 0;
 let score = 0;
+let gameState: 'playing' | 'results' = 'playing';
 
-// World objects (cleaned up between rounds)
+// World objects
 let biome: BiomeConfig | null = null;
 let terrainMesh: THREE.Mesh | null = null;
 let heightmap: number[][] = [];
@@ -87,12 +50,21 @@ let creatures: CreatureInstance[] = [];
 let player: PlayerController | null = null;
 let scanner: Scanner | null = null;
 let particles: ParticleSystem | null = null;
-let mobile: MobileControls | null = null;
 let speciesCard: SpeciesCard | null = null;
-
 let scanning = false;
 
-// ── Terrain Height Helper ────────────────────────────────────────────────────
+// UI (always present)
+const hud = new HUD();
+const resultsScreen = new ResultsScreen();
+document.getElementById('ui-root')!.appendChild(hud.el);
+document.getElementById('ui-root')!.appendChild(resultsScreen.el);
+resultsScreen.el.style.display = 'none';
+
+// Mobile controls
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+let mobile: MobileControls | null = null;
+
+// ── Terrain Height ──────────────────────────────────────────────────────────
 const resolution = TERRAIN_SEGMENTS + 1;
 const halfSize = TERRAIN_SIZE / 2;
 
@@ -105,7 +77,7 @@ function getTerrainHeight(worldX: number, worldZ: number): number {
   return (heightmap[iz]?.[ix] ?? 0) * biome.terrainScale;
 }
 
-// ── World Lifecycle ──────────────────────────────────────────────────────────
+// ── World Lifecycle ─────────────────────────────────────────────────────────
 function cleanupWorld(): void {
   if (terrainMesh) { scene.remove(terrainMesh); terrainMesh.geometry.dispose(); terrainMesh = null; }
   for (const f of flora) scene.remove(f.mesh);
@@ -116,9 +88,11 @@ function cleanupWorld(): void {
   particles = null;
   scanner?.dispose();
   scanner = null;
-  player = null;
+  if (player) { player.dispose(); player = null; }
   speciesCard?.dispose();
   speciesCard = null;
+  mobile?.dispose();
+  mobile = null;
 }
 
 function startRound(seed: number): void {
@@ -126,7 +100,6 @@ function startRound(seed: number): void {
 
   const rng = new PRNG(seed);
   biome = createBiome(rng);
-  totalPossibleSpecies = biome.faunaCount;
 
   // Sky + fog
   const fogColor = biome.palette[4];
@@ -148,10 +121,9 @@ function startRound(seed: number): void {
 
   // Player
   player = new PlayerController(scene, camera);
-  player['position'].set(0, getTerrainHeight(0, 0) + 2, 0);
+  player.position.set(0, getTerrainHeight(0, 0) + 2, 0);
 
-  // Mobile controls
-  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  // Mobile
   if (isTouchDevice) {
     mobile = new MobileControls();
     mobile.show();
@@ -171,14 +143,58 @@ function startRound(seed: number): void {
   score = 0;
 
   // Audio
+  audio.stopAmbient();
   audio.startAmbient(biome.baseHue);
 
   // HUD
+  hud.el.style.display = '';
   hud.updateTimer(ROUND_DURATION);
   hud.updateScore(0);
   hud.showChallenges(roundState.challenges, new Map());
 
-  console.log(`Round started — Biome: ${biome.name} | Seed: ${seed}`);
+  // Hide results if shown
+  resultsScreen.el.style.display = 'none';
+  gameState = 'playing';
+
+  // Lock pointer on desktop
+  if (!isTouchDevice) {
+    renderer.domElement.addEventListener('click', requestPointerLock);
+  }
+
+  console.log(`Biome: ${biome.name} | Seed: ${seed}`);
+}
+
+function requestPointerLock(): void {
+  if (!document.pointerLockElement) {
+    renderer.domElement.requestPointerLock?.();
+  }
+}
+
+function showResults(): void {
+  gameState = 'results';
+  audio.stopAmbient();
+  audio.playFanfare();
+  document.exitPointerLock?.();
+  renderer.domElement.removeEventListener('click', requestPointerLock);
+
+  if (!roundState) return;
+  const results = getRoundResults(roundState);
+  resultsScreen.el.style.display = 'flex';
+  hud.el.style.display = 'none';
+
+  resultsScreen.show(results, () => {
+    // Next expedition — new seed, new biome
+    startRound(Date.now());
+  });
+
+  // Post scores
+  for (const r of results) {
+    fetch('/api/leaderboard', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player: r.player, points: r.score }),
+    }).catch(() => {});
+  }
 }
 
 // ── Scan Handling ────────────────────────────────────────────────────────────
@@ -187,201 +203,81 @@ function handleScanComplete(result: ScanResult): void {
 
   const { species, isNewToWorld, points } = result;
 
-  // Add to known set
   knownSpeciesIds.add(species.id);
   score += points;
 
-  // Show species card
+  // Species card popup
   speciesCard?.dispose();
   speciesCard = new SpeciesCard();
   speciesCard.show(result);
 
-  // Audio feedback
+  // Audio
   audio.playDiscovery(isNewToWorld);
 
-  // Update round state
+  // Round tracking
   const challengeWon = addScanToRound(
     roundState, username, isNewToWorld, points,
     { behavior: species.definition.behavior, rarity: species.rarity }
   );
 
-  // HUD updates
+  // HUD
   hud.updateScore(score);
-  const feedMsg = isNewToWorld
-    ? `NEW DISCOVERY: ${species.name} (+${points})`
-    : `Scanned: ${species.name} (+${points})`;
-  hud.addFeedMessage(feedMsg);
+  hud.addFeedMessage(
+    isNewToWorld
+      ? `★ NEW: ${species.name} (+${points})`
+      : `Scanned: ${species.name} (+${points})`
+  );
 
   if (challengeWon) {
     const challenge = roundState.challenges.find(c => c.id === challengeWon);
     if (challenge) {
-      hud.addFeedMessage(`CHALLENGE: ${challenge.description} (+${challenge.bonusPoints})`);
+      hud.addFeedMessage(`⚡ ${challenge.description} (+${challenge.bonusPoints})`);
       score += challenge.bonusPoints;
       hud.updateScore(score);
     }
-    hud.showChallenges(
-      roundState.challenges,
-      roundState.completedChallenges
-    );
+    hud.showChallenges(roundState.challenges, roundState.completedChallenges);
   }
 
-  // POST to catalog API if new discovery
+  // Persist new discoveries
   if (isNewToWorld) {
     const { definition } = species;
     fetch('/api/catalog', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        speciesId: species.id,
-        name: species.name,
-        bodyType: definition.bodyType,
-        headType: definition.headType,
-        limbCount: definition.limbCount,
-        colorHue: definition.colorHue,
-        behavior: definition.behavior,
-        biomeType: definition.biomeType,
+        speciesId: species.id, name: species.name, discoverer: username,
+        bodyType: definition.bodyType, headType: definition.headType,
+        limbCount: definition.limbCount, colorHue: definition.colorHue,
+        behavior: definition.behavior, biomeType: definition.biomeType,
         rarity: species.rarity,
-        discoverer: username,
       }),
-    }).then(() => {
-      catalogSize++;
-      // Broadcast to other players via lobby
-      lobbyClient.broadcastDiscovery(species.name, username);
-    }).catch(() => { /* offline is fine */ });
+    }).then(() => { catalogSize++; }).catch(() => {});
   }
 }
 
-// ── State Machine ────────────────────────────────────────────────────────────
-gameManager.onChange((_from, to) => {
-  ui.hideAll();
-
-  switch (to) {
-    case 'menu':
-      ui.show('lobby');
-      lobbyScreen.showMenuView();
-      break;
-
-    case 'lobby':
-      ui.show('lobby');
-      break;
-
-    case 'playing':
-      ui.show('hud');
-      // Lock pointer on desktop
-      if (!('ontouchstart' in window)) {
-        renderer.domElement.requestPointerLock?.();
-      }
-      break;
-
-    case 'results': {
-      ui.show('results');
-      audio.stopAmbient();
-      audio.playFanfare();
-      // Unlock pointer
-      document.exitPointerLock?.();
-      if (!roundState) break;
-      const results = getRoundResults(roundState);
-      resultsScreen.show(results, () => {
-        // Next expedition
-        const nextSeed = Date.now();
-        if (isHost) lobbyClient.startGame(nextSeed);
-        else startPlayingState(nextSeed);
-      });
-      // Post scores to leaderboard
-      for (const r of results) {
-        fetch('/api/leaderboard', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: r.player, score: r.score }),
-        }).catch(() => {});
-      }
-      break;
-    }
-  }
-});
-
-function startPlayingState(seed: number): void {
-  startRound(seed);
-  gameManager.transition('playing');
-}
-
-// ── Lobby Client Events ──────────────────────────────────────────────────────
-lobbyClient.on('lobby-list', (data: any) => {
-  lobbyScreen.updateLobbyList(data.lobbies ?? []);
-});
-
-lobbyClient.on('lobby-created', async () => {
-  isHost = true;
-  gameManager.transition('lobby');
-
-  // Start WebRTC host
-  gameHost = new GameHost();
-  const peerId = await gameHost.start();
-  lobbyClient.setHostPeerId(peerId);
-
-  lobbyScreen.showLobbyView([username], true);
-});
-
-lobbyClient.on('lobby-joined', (data: any) => {
-  isHost = false;
-  gameManager.transition('lobby');
-  lobbyScreen.showLobbyView(data.players ?? [username], false);
-});
-
-lobbyClient.on('player-joined', (data: any) => {
-  lobbyScreen.updatePlayers(data.players ?? []);
-});
-
-lobbyClient.on('player-left', (data: any) => {
-  lobbyScreen.updatePlayers(data.players ?? []);
-});
-
-lobbyClient.on('host-peer-id', async (data: any) => {
-  if (isHost) return; // Host doesn't connect to itself
-  gamePeer = new GamePeer();
-  try {
-    await gamePeer.connect(data.peerId, username);
-    gamePeer.onMessage((msg) => {
-      if (msg.type === 'discovery-fanfare') {
-        hud.addFeedMessage(`${msg.discoverer} discovered: ${msg.speciesName}!`);
-      }
-    });
-  } catch (err) {
-    console.error('Failed to connect to host:', err);
-  }
-});
-
-lobbyClient.on('game-starting', (data: any) => {
-  startPlayingState(data.seed);
-});
-
-// ── Scanning Input ───────────────────────────────────────────────────────────
+// ── Input ───────────────────────────────────────────────────────────────────
 document.addEventListener('mousedown', (e) => {
   if (e.button === 0) scanning = true;
-  // Start audio on first interaction (browser requirement)
-  if (!audio['context']) audio.start();
+  if (!audio.isStarted) audio.start();
 });
 document.addEventListener('mouseup', (e) => {
   if (e.button === 0) scanning = false;
 });
-
-// Touch: right half of screen = scan
 document.addEventListener('touchstart', (e) => {
   for (const t of Array.from(e.touches)) {
     if (t.clientX > innerWidth / 2) { scanning = true; break; }
   }
-  if (!audio['context']) audio.start();
+  if (!audio.isStarted) audio.start();
 });
 document.addEventListener('touchend', () => { scanning = false; });
 
-// ── Resize ───────────────────────────────────────────────────────────────────
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
 
-// ── Game Loop ────────────────────────────────────────────────────────────────
+// ── Game Loop ───────────────────────────────────────────────────────────────
 let lastTime = performance.now();
 const startTime = performance.now();
 
@@ -393,27 +289,19 @@ function animate(): void {
   lastTime = now;
   const elapsed = (now - startTime) / 1000;
 
-  if (gameManager.getState() === 'playing' && player && roundState) {
-    // Mobile input
+  if (gameState === 'playing' && player && roundState) {
     if (mobile) player.setMobileInput(mobile.consume());
 
-    // Update systems
     player.update(dt, getTerrainHeight);
     updateFlora(flora, elapsed);
     updateCreatures(creatures, dt, elapsed, player.getPosition(), getTerrainHeight, TERRAIN_SIZE);
     particles?.update(elapsed);
+    scanner?.update(dt, camera, creatures, scanning, knownSpeciesIds, catalogSize, 5000);
 
-    // Scanner
-    scanner?.update(dt, camera, creatures, scanning, knownSpeciesIds, catalogSize, totalPossibleSpecies);
-
-    // Round timer
     if (roundState.isActive) {
       const ended = updateRound(roundState, dt);
       hud.updateTimer(roundState.timeRemaining);
-
-      if (ended) {
-        gameManager.transition('results');
-      }
+      if (ended) showResults();
     }
   }
 
@@ -421,9 +309,51 @@ function animate(): void {
 }
 animate();
 
-// ── Bootstrap ────────────────────────────────────────────────────────────────
+// ── Username Prompt (minimal, non-blocking) ─────────────────────────────────
+function showUsernamePrompt(): void {
+  const overlay = document.createElement('div');
+  Object.assign(overlay.style, {
+    position: 'fixed', inset: '0',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'rgba(10,10,15,0.85)', zIndex: '500',
+    fontFamily: 'monospace', color: '#fff',
+  });
+
+  const box = document.createElement('div');
+  box.style.textAlign = 'center';
+  box.innerHTML = `
+    <h1 style="color:#7af5ca;font-size:32px;margin-bottom:8px;">Xenozoologist Express</h1>
+    <p style="color:#888;font-size:14px;margin-bottom:24px;">Explore alien worlds. Catalog the unknown.</p>
+    <input type="text" placeholder="Your name..." maxlength="20"
+      style="width:300px;padding:12px;background:rgba(255,255,255,0.08);border:1px solid #444;
+      color:white;font-family:monospace;font-size:18px;border-radius:8px;text-align:center;outline:none;" />
+    <br>
+    <button style="margin-top:16px;padding:14px 60px;background:#7af5ca;color:#0a0a0f;
+      border:none;font-family:monospace;font-size:18px;font-weight:bold;border-radius:8px;cursor:pointer;">
+      Explore
+    </button>
+    <p style="color:#555;font-size:11px;margin-top:16px;">WASD to move · Mouse to look · Click to scan creatures</p>
+  `;
+  overlay.appendChild(box);
+  document.getElementById('ui-root')!.appendChild(overlay);
+
+  const input = box.querySelector('input')!;
+  const btn = box.querySelector('button')!;
+
+  function go(): void {
+    username = input.value.trim() || 'Explorer';
+    overlay.remove();
+    startRound(Date.now());
+  }
+
+  btn.addEventListener('click', go);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  input.focus();
+}
+
+// ── Init ────────────────────────────────────────────────────────────────────
 async function init(): Promise<void> {
-  // Fetch catalog count for scoring
+  // Fetch catalog size for progressive scoring
   try {
     const res = await fetch('/api/catalog/count');
     const data = await res.json();
@@ -432,23 +362,8 @@ async function init(): Promise<void> {
     catalogSize = 0;
   }
 
-  // Connect lobby WebSocket
-  try {
-    await lobbyClient.connect();
-    lobbyClient.listLobbies();
-  } catch (err) {
-    console.warn('Lobby server unavailable, single-player only:', err);
-  }
-
-  // Show lobby / menu
-  gameManager.transition('menu');
-
-  // Quick-play: add a "Solo Expedition" option — pressing Start without a lobby
-  // just starts a local round. The LobbyScreen onStartGame already generates a seed
-  // and calls lobbyClient.startGame, but if WS is down we handle it here:
-  lobbyClient.on('error', () => {
-    console.warn('Lobby connection error');
-  });
+  // Show the name prompt — one click and you're in
+  showUsernamePrompt();
 }
 
 init();

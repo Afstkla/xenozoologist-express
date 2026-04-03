@@ -1,5 +1,6 @@
 export class AudioManager {
   private context: AudioContext | null = null;
+  get isStarted(): boolean { return this.context !== null; }
   private masterGain: GainNode | null = null;
   private ambientOscillators: OscillatorNode[] = [];
   private ambientGains: GainNode[] = [];

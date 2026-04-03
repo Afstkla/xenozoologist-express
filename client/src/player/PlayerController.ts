@@ -17,7 +17,7 @@ export interface MobileInput {
 }
 
 export class PlayerController {
-  private mesh: THREE.Group;
+  readonly mesh: THREE.Group;
   private camera: THREE.PerspectiveCamera;
   private scene: THREE.Scene;
 
@@ -26,7 +26,7 @@ export class PlayerController {
   private pitch = 0.3;
   private velocityY = 0;
   private onGround = false;
-  private position = new THREE.Vector3(0, 10, 0);
+  readonly position = new THREE.Vector3(0, 10, 0);
 
   // Input
   private keys = new Set<string>();
@@ -182,7 +182,7 @@ export class PlayerController {
 
     // --- Update mesh ---
     this.mesh.position.copy(this.position);
-    this.mesh.rotation.y = this.yaw;
+    this.mesh.rotation.y = this.yaw + Math.PI; // Mesh faces +Z, camera is behind at +Z, so flip
 
     // --- Update camera (3rd person orbit) ---
     const camX = this.position.x + Math.sin(this.yaw) * CAMERA_DISTANCE * Math.cos(this.pitch);
