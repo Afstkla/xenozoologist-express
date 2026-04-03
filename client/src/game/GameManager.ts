@@ -4,6 +4,7 @@ type ChangeCallback = (from: GameState, to: GameState) => void;
 
 export class GameManager {
   private state: GameState = 'menu';
+  private initialized = false;
   private changeCallbacks: ChangeCallback[] = [];
 
   onChange(cb: ChangeCallback): void {
@@ -16,7 +17,8 @@ export class GameManager {
 
   transition(to: GameState): void {
     const from = this.state;
-    if (from === to) return;
+    if (this.initialized && from === to) return;
+    this.initialized = true;
     this.state = to;
     for (const cb of this.changeCallbacks) {
       cb(from, to);
