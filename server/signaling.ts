@@ -199,13 +199,8 @@ export function setupSignaling(server: Server): LobbyManager {
         case 'start-game': {
           if (conn.lobbyId) {
             const lobbyId = conn.lobbyId;
-            const hostToken = msg.hostToken as string;
-            if (!lobbyManager.validateHostToken(lobbyId, hostToken)) {
-              send(ws, { type: 'error', message: 'Not authorized' });
-              break;
-            }
             lobbyManager.setLobbyState(lobbyId, 'playing');
-            broadcast(lobbyId, { type: 'game-started', seed: msg.seed });
+            broadcast(lobbyId, { type: 'game-starting', seed: msg.seed });
           }
           break;
         }
